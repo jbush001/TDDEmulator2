@@ -19,7 +19,7 @@ import * as dsp from './dsp.mjs';
 const MARK_FREQUENCY = 1400;
 const SPACE_FREQUENCY = 1800;
 const BIT_RATE = 45;
-let suppressInput = false;
+const GUARD_PERIOD = 10;
 
 class Modem extends AudioWorkletProcessor {
     constructor(options) {
@@ -39,14 +39,23 @@ class Modem extends AudioWorkletProcessor {
 
         this.serialEncoder = new dsp.SerialEncoder(5, sampleRate / BIT_RATE);
         this.sendBuffer = [];
+        this.sending = false;
+        this.guardTimer = 0;
     }
 
     process(inputs, outputs, parameters) {
+        // The guard timer disables reception for a period after sending finishes,
+        // as there is some latency in the audio pipeline that can cause stray
+        // characters to appear otherwise.
+        if (this.guardTimer > 0) {
+            this.guardTimer--;
+        }
+
         this.processOutput(outputs[0][0]);
 
         // This is single duplex. We don't decode messages our own sent messages,
         // so disable decoding while we are transmitting.
-        if (inputs && inputs[0].length > 0 && !suppressInput) {
+        if (inputs && inputs[0].length > 0 && !this.sending && this.guardTimer == 0) {
             this.processInput(inputs[0][0]);
         }
 
@@ -58,32 +67,31 @@ class Modem extends AudioWorkletProcessor {
             this.serialEncoder.sendValue(this.sendBuffer.shift());
         }
 
-        if (!this.serialEncoder.isSending() && this.sendBuffer.length == 0) {
-            suppressInput = false;
+        const newSending = this.serialEncoder.isSending() || this.sendBuffer.length != 0;
+        if (!newSending && this.sending) {
+            // We've just finished sending, start the timer
+            this.guardTimer = GUARD_PERIOD;
         }
 
-        for (let i = 0; i < buffer.length; i++) {
-            const nrz = this.serialEncoder.process();
-            buffer[i] = this.modulator.process(nrz);
+        this.sending = newSending;
+
+        if (newSending) {
+            for (let i = 0; i < buffer.length; i++) {
+                const nrz = this.serialEncoder.process();
+                buffer[i] = this.modulator.process(nrz);
+            }
         }
     }
 
     processInput(buffer) {
-        let lp1 = 0;
-        let lp2 = 0;
-        let nrz = 0;
-
         for (let i = 0; i < buffer.length; i++) {
-            nrz = this.demodulator.process(buffer[i]);
+            let nrz = this.demodulator.process(buffer[i]);
             this.serialDecoder.process(nrz);
         }
     }
 
     handleMessage(event) {
         this.sendBuffer = this.sendBuffer.concat(event.data);
-        if (this.sendBuffer) {
-            suppressInput = true;
-        }
     }
 }
 
