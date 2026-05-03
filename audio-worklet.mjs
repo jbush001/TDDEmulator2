@@ -16,9 +16,6 @@
 
 import * as dsp from './dsp.mjs';
 
-const MARK_FREQUENCY = 1400;
-const SPACE_FREQUENCY = 1800;
-const BIT_RATE = 45;
 const GUARD_PERIOD = 10;
 
 class Modem extends AudioWorkletProcessor {
@@ -26,18 +23,11 @@ class Modem extends AudioWorkletProcessor {
         super();
         this.port.onmessage = this.handleMessage.bind(this);
         this.theta = 0;
-        this.frequency = MARK_FREQUENCY;
-        this.count = 0;
-        this.demodulator = new dsp.FSKDemodulator(MARK_FREQUENCY,
-            SPACE_FREQUENCY, BIT_RATE, sampleRate);
-        this.modulator = new dsp.FSKModulator(MARK_FREQUENCY,
-            SPACE_FREQUENCY, sampleRate);
-        this.serialDecoder = new dsp.SerialDecoder(5,
-            sampleRate / BIT_RATE, (value) => {
-            this.port.postMessage(value);
-        });
-
-        this.serialEncoder = new dsp.SerialEncoder(5, sampleRate / BIT_RATE);
+        this.demodulator = null;
+        this.modulator = null;
+        this.serialDecoder = null;
+        this.serialEncoder = null;
+        this.fullDuplex = false;
         this.sendBuffer = [];
         this.sending = false;
         this.guardTimer = 0;
@@ -55,7 +45,8 @@ class Modem extends AudioWorkletProcessor {
 
         // This is single duplex. We don't decode messages our own sent messages,
         // so disable decoding while we are transmitting.
-        if (inputs && inputs[0].length > 0 && !this.sending && this.guardTimer == 0) {
+        if (inputs && inputs[0].length > 0 &&
+            ((!this.sending && this.guardTimer == 0) || this.fullDuplex)) {
             this.processInput(inputs[0][0]);
         }
 
@@ -91,7 +82,26 @@ class Modem extends AudioWorkletProcessor {
     }
 
     handleMessage(event) {
-        this.sendBuffer = this.sendBuffer.concat(event.data);
+        const message = event.data;
+        switch (message.type) {
+            case 'send':
+                this.sendBuffer = this.sendBuffer.concat(message.content);
+                break;
+
+            case 'config':
+                this.demodulator = new dsp.FSKDemodulator(message.config.rxMarkFrequency,
+                    message.config.rxSpaceFrequency, message.config.bitRate, sampleRate);
+                this.modulator = new dsp.FSKModulator(message.config.txMarkFrequency,
+                    message.config.txSpaceFrequency, sampleRate);
+                this.serialDecoder = new dsp.SerialDecoder(message.config.dataBits,
+                    sampleRate / message.config.bitRate, (value) => {
+                    this.port.postMessage(value);
+                });
+                this.serialEncoder = new dsp.SerialEncoder(message.config.dataBits,
+                    sampleRate / message.config.bitRate);
+                this.fullDuplex = message.config.fullDuplex;
+                break;
+        }
     }
 }
 

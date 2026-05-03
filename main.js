@@ -90,12 +90,24 @@ class BaudotDecoder {
     }
 }
 
+class ASCIIEncoder {
+  process(input) {
+    return [input.charCodeAt(0)];
+  }
+}
+
+class ASCIIDecoder {
+  process(input) {
+    return String.fromCharCode(input);
+  }
+}
+
 let audioContext = null;
 let workletNode = null;
 let currentRecvMsgDiv = null;
 let audioStarted = false;
-const decoder = new BaudotDecoder();
-const encoder = new BaudotEncoder();
+let decoder = null;
+let encoder = null;
 let lastReceiveTime = 0;
 
 document.addEventListener('DOMContentLoaded', async (event) => {
@@ -108,6 +120,21 @@ document.addEventListener('DOMContentLoaded', async (event) => {
   workletNode.onprocessorerror = (err) => {
     console.log('worklet node encountered error', err);
   };
+
+  const protocolSelector = document.getElementById('protocol');
+  for (const type of Object.keys(CONFIGS)) {
+    const option = document.createElement('option');
+    option.value = type;
+    option.innerText = type;
+    protocolSelector.appendChild(option);
+  }
+
+  protocolSelector.addEventListener('change', (event) =>  {
+    configureModem(event.target.value);
+  });
+
+  protocolSelector.selectedIndex = 0;
+  configureModem(protocolSelector.options[0].value);
 
   const stream = await navigator.mediaDevices
       .getUserMedia({ audio: {
@@ -126,6 +153,7 @@ document.addEventListener('DOMContentLoaded', async (event) => {
     }
   }
 
+
   document.getElementById('send-button').addEventListener('click', handleSendMessage);
   document.getElementById('user-input').addEventListener('keypress', (e) => {
     startAudio();
@@ -135,6 +163,51 @@ document.addEventListener('DOMContentLoaded', async (event) => {
     }
   });
 });
+
+const CONFIGS = {
+  'TIA/EIA-825': {
+      rxMarkFrequency: 1400,
+      rxSpaceFrequency: 1800,
+      txMarkFrequency: 1400,
+      txSpaceFrequency: 1800,
+      bitRate: 45,
+      dataBits: 5,
+      fullDuplex: false,
+  },
+  'v.18 originate': {
+      rxMarkFrequency: 1650,
+      rxSpaceFrequency: 1850,
+      txMarkFrequency: 980,
+      txSpaceFrequency: 1180,
+      bitRate: 150, // XXX this should be 300, but doesn't work acoustically
+      dataBits: 8,
+      fullDuplex: true,
+  },
+  'v.18 answer': {
+      rxMarkFrequency: 980,
+      rxSpaceFrequency: 1180,
+      txMarkFrequency: 1650,
+      txSpaceFrequency: 1850,
+      bitRate: 150,
+      dataBits: 8,
+      fullDuplex: true,
+  }
+};
+
+function configureModem(mode) {
+  workletNode.port.postMessage({
+    type: 'config',
+    config: CONFIGS[mode]
+  });
+
+  if (mode == 'TIA/EIA-825') {
+    decoder = new BaudotDecoder();
+    encoder = new BaudotEncoder();
+  } else {
+    decoder = new ASCIIDecoder();
+    encoder = new ASCIIEncoder();
+  }
+}
 
 // We need to do this lazily, since the browser won't allow us to until the user interacts
 // with the page.
@@ -163,7 +236,7 @@ function handleSendMessage() {
     }
   }
 
-  workletNode.port.postMessage(msg);
+  workletNode.port.postMessage({type: 'send', content: msg});
 }
 
 function addReceiveMessageToHistory(text) {
