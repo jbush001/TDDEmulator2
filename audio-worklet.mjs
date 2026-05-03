@@ -1,0 +1,90 @@
+//
+// Copyright 2026 Jeff Bush
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//
+
+import * as dsp from './dsp.mjs';
+
+const MARK_FREQUENCY = 1400;
+const SPACE_FREQUENCY = 1800;
+const BIT_RATE = 45;
+let suppressInput = false;
+
+class Modem extends AudioWorkletProcessor {
+    constructor(options) {
+        super();
+        this.port.onmessage = this.handleMessage.bind(this);
+        this.theta = 0;
+        this.frequency = MARK_FREQUENCY;
+        this.count = 0;
+        this.demodulator = new dsp.FSKDemodulator(MARK_FREQUENCY,
+            SPACE_FREQUENCY, BIT_RATE, sampleRate);
+        this.modulator = new dsp.FSKModulator(MARK_FREQUENCY,
+            SPACE_FREQUENCY, sampleRate);
+        this.serialDecoder = new dsp.SerialDecoder(5,
+            sampleRate / BIT_RATE, (value) => {
+            this.port.postMessage(value);
+        });
+
+        this.serialEncoder = new dsp.SerialEncoder(5, sampleRate / BIT_RATE);
+        this.sendBuffer = [];
+    }
+
+    process(inputs, outputs, parameters) {
+        this.processOutput(outputs[0][0]);
+
+        // This is single duplex. We don't decode messages our own sent messages,
+        // so disable decoding while we are transmitting.
+        if (inputs && inputs[0].length > 0 && !suppressInput) {
+            this.processInput(inputs[0][0]);
+        }
+
+        return true;
+    }
+
+    processOutput(buffer) {
+        if (!this.serialEncoder.isSending() && this.sendBuffer.length > 0) {
+            this.serialEncoder.sendValue(this.sendBuffer.shift());
+        }
+
+        if (!this.serialEncoder.isSending() && this.sendBuffer.length == 0) {
+            suppressInput = false;
+        }
+
+        for (let i = 0; i < buffer.length; i++) {
+            const nrz = this.serialEncoder.process();
+            buffer[i] = this.modulator.process(nrz);
+        }
+    }
+
+    processInput(buffer) {
+        let lp1 = 0;
+        let lp2 = 0;
+        let nrz = 0;
+
+        for (let i = 0; i < buffer.length; i++) {
+            nrz = this.demodulator.process(buffer[i]);
+            this.serialDecoder.process(nrz);
+        }
+    }
+
+    handleMessage(event) {
+        this.sendBuffer = this.sendBuffer.concat(event.data);
+        if (this.sendBuffer) {
+            suppressInput = true;
+        }
+    }
+}
+
+registerProcessor('modem', Modem);
