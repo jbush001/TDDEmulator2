@@ -14,19 +14,35 @@
 // limitations under the License.
 //
 
-// Maps a 7 bit unicode code point to a 5 bit baudot code.	A -1 in this
-// table indicates no mapping.	If the 7th bit is set (0x80), then this
-// is in the FIG table, otherwise it is in the LTR table.
-const UNICODE_TO_BAUDOT = [
-  -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, 130, -1, -1, 136, -1, -1, -1,
-  -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, 132, 141,
-  145, -1, 137, -1, -1, 139, 143, 146, -1, 154, 140, 133, 156, 157, 150,
-  151, 147, 129, 138, 144, 149, 135, 134, 152, 142, 158, -1, 148, -1,
-  153, -1, 3, 25, 14, 9, 1, 13, 26, 20, 6, 11, 15, 18, 28, 12, 24, 22, 23,
-  10, 5, 16, 7, 30, 19, 29, 21, 17, -1, -1, -1, -1, -1, -1, 3, 25, 14, 9,
-  1, 13, 26, 20, 6, 11, 15, 18, 28, 12, 24, 22, 23, 10, 5, 16, 7, 30, 19,
-  29, 21, 17, -1, -1, -1, -1, -1
+
+// https://en.wikipedia.org/wiki/Baudot_code
+const LTR_TO_UNICODE = [
+  ' ', 'E', '\n', 'A', ' ', 'S', 'I', 'U',
+  '\r', 'D', 'R', 'J', 'N', 'F', 'C', 'K',
+  'T', 'Z', 'L', 'W', 'H', 'Y', 'P', 'Q',
+  'O', 'B', 'G', ' ', 'M', 'X', 'V', ' '
 ];
+
+const FIG_TO_UNICODE = [
+  ' ', '3', '\n', '-', ' ', '-', '8', '7',
+  '\r', '$', '4', '\'', ',', '!', ':', '(',
+  '5', '\"', ')', '2', '=', '6', '0', '1',
+  '9', '?', '+', ' ', '.', '/', ';', ' '
+];
+
+// Create the inverse table from above
+const UNICODE_TO_BAUDOT = Object.freeze(
+  LTR_TO_UNICODE.reduce((accumulator, ltr, index) => {
+    if (ltr) {
+      accumulator[ltr] = index;
+      accumulator[ltr.toLowerCase()] = index;
+    }
+    return accumulator;
+  },
+  FIG_TO_UNICODE.reduce((accumulator, fig, index) => {
+    if (fig) accumulator[fig] = index | 0x80;
+    return accumulator;
+  }, {})));
 
 class BaudotEncoder {
     constructor() {
@@ -34,12 +50,12 @@ class BaudotEncoder {
     }
 
     process(input) {
-      const codePoint = input.charCodeAt(0);
-      if (codePoint > 127) {
-        return; // Can't encode
+      const encoded = UNICODE_TO_BAUDOT[input];
+      if (encoded === undefined) {
+        console.log('cannot encode', input);
+        return []; // Not in table
       }
 
-      const encoded = UNICODE_TO_BAUDOT[input.charCodeAt(0)];
       const needFig = (encoded & 0x80) != 0;
       const response = [];
       if (needFig && !this.inFigMode) {
@@ -54,21 +70,6 @@ class BaudotEncoder {
       return response;
     }
 }
-
-// Baudot to unicode tables
-const LTR_TO_UNICODE = [
-  ' ', 'E', '\n', 'A', ' ', 'S', 'I', 'U',
-  '\r', 'D', 'R', 'J', 'N', 'F', 'C', 'K',
-  'T', 'Z', 'L', 'W', 'H', 'Y', 'P', 'Q',
-  'O', 'B', 'G', ' ', 'M', 'X', 'V', ' '
-];
-
-const FIG_TO_UNICODE = [
-  ' ', '3', '\n', '-', ' ', '-', '8', '7',
-  '\r', '$', '4', '\'', ',', '!', ':', '(',
-  '5', '\"', ')', '2', '=', '6', '0', '1',
-  '9', '?', '+', ' ', '.', '/', ';', ' '
-];
 
 class BaudotDecoder {
     constructor() {
