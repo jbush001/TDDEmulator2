@@ -127,7 +127,7 @@ export class SerialEncoder {
 
   process() {
     if (this.sending) {
-      if (--this.sampleCount == 0) {
+      if (--this.sampleCount <= 0) {
         this.sampleCount = this.samplesPerBit;
         if (++this.bitCount == this.numDataBits + 2) {
           this.sending = false;
@@ -170,7 +170,7 @@ export class SerialDecoder {
         break;
 
       case 'process_data':
-        if (--this.sampleCount == 0) {
+        if (--this.sampleCount <= 0) {
           const bitValue = (sample > 0) ? 1 : 0;
           this.currentWord = (this.currentWord >> 1) | (bitValue << (this.numDataBits - 1));
           this.sampleCount = this.samplesPerBit;
@@ -183,7 +183,7 @@ export class SerialDecoder {
         break;
 
       case 'wait_for_stop':
-        if (this.sampleCount < 0) {
+        if (this.sampleCount > 0) {
           // Wait for center of stop bit.
           this.sampleCount--;
         } else {

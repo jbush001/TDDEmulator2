@@ -88,19 +88,22 @@ class Modem extends AudioWorkletProcessor {
         this.sendBuffer = this.sendBuffer.concat(message.content);
         break;
 
-      case 'config':
+      case 'config': {
         this.demodulator = new dsp.FSKDemodulator(message.config.rxMarkFrequency,
           message.config.rxSpaceFrequency, message.config.bitRate, sampleRate);
         this.modulator = new dsp.FSKModulator(message.config.txMarkFrequency,
           message.config.txSpaceFrequency, sampleRate);
+        
+        let samplesPerBit = Math.floor(sampleRate / message.config.bitRate)
         this.serialDecoder = new dsp.SerialDecoder(message.config.dataBits,
-          sampleRate / message.config.bitRate, (value) => {
+          samplesPerBit, (value) => {
           this.port.postMessage(value);
         });
         this.serialEncoder = new dsp.SerialEncoder(message.config.dataBits,
-          sampleRate / message.config.bitRate);
+          samplesPerBit);
         this.fullDuplex = message.config.fullDuplex;
         break;
+      }
     }
   }
 }
